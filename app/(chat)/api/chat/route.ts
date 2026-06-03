@@ -260,49 +260,36 @@ export async function POST(request: Request) {
                 '[POST] [onFinish] User session exists, saving assistant message',
               );
               try {
-                const assistantId = getTrailingMessageId({
-                  messages: response.messages.filter(
-                    (message) => message.role === 'assistant',
-                  ),
-                });
-                console.log(
-                  '[POST] [onFinish] Assistant message ID:',
-                  assistantId,
-                );
-
-                if (!assistantId) {
-                  console.log('[POST] [onFinish] No assistant message found!');
-                  throw new Error('No assistant message found!');
-                }
-
                 console.log('[POST] [onFinish] Appending response messages');
-                const [, assistantMessage] = appendResponseMessages({
+                const allResponseMessages = appendResponseMessages({
                   messages: [message],
                   responseMessages: response.messages,
                 });
-                console.log('[POST] [onFinish] Assistant message prepared:', {
-                  role: assistantMessage.role,
-                  partsCount: assistantMessage.parts?.length || 0,
+                // Skip index 0 (the original user message) and save ALL
+                // response messages so that multi-step tool_use / tool_result
+                // pairs are fully persisted and the conversation history sent
+                // to Anthropic remains valid.
+                const messagesToSave = allResponseMessages.slice(1).map(
+                  (msg) => ({
+                    id: msg.id,
+                    chatId: id,
+                    role: msg.role,
+                    parts: msg.parts,
+                    attachments: msg.experimental_attachments ?? [],
+                    createdAt: new Date(),
+                  }),
+                );
+                console.log('[POST] [onFinish] Messages to save:', {
+                  count: messagesToSave.length,
+                  roles: messagesToSave.map((m) => m.role),
                 });
 
                 console.log(
-                  '[POST] [onFinish] Saving assistant message to database',
+                  '[POST] [onFinish] Saving all response messages to database',
                 );
-                await saveMessages({
-                  messages: [
-                    {
-                      id: assistantId,
-                      chatId: id,
-                      role: assistantMessage.role,
-                      parts: assistantMessage.parts,
-                      attachments:
-                        assistantMessage.experimental_attachments ?? [],
-                      createdAt: new Date(),
-                    },
-                  ],
-                });
+                await saveMessages({ messages: messagesToSave });
                 console.log(
-                  '[POST] [onFinish] Assistant message saved successfully',
+                  '[POST] [onFinish] All response messages saved successfully',
                 );
 
                 // Disabled message eviction for now
